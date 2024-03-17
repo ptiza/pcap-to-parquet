@@ -176,13 +176,11 @@ fn parse_ethernet_frame(packet: &[u8], packet_fields: &mut Packet) {
             parse_ipv4_packet(&packet[18..], packet_fields);
         } else {
             //TODO
-            return;
         }
     } else if ether_type == 0x800 {
         // IPv4 packet
         parse_ipv4_packet(&packet[14..], packet_fields);
     } else {
         //TODO
-        return;
     }
 }
