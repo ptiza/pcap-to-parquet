@@ -70,6 +70,7 @@ fn main() {
         .set_compression(parquet::basic::Compression::ZSTD(
             parquet::basic::ZstdLevel::try_new(3).unwrap(),
         ))
+        .set_writer_version(parquet::file::properties::WriterVersion::PARQUET_2_0)
         .build();
 
     let mut writer = parquet::arrow::ArrowWriter::try_new(file, schema, Some(props)).unwrap();
