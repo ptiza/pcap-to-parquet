@@ -1,11 +1,12 @@
 [package]
 name = "pcap-to-parquet"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+arrow-array = "50.0.0"
 parquet = "50.0.0"
 
 [profile.release]
