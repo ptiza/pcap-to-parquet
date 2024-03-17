@@ -63,16 +63,15 @@ fn main() {
     }
 
     // parquet file setup
+    let path = std::path::Path::new(output_path.as_str());
+    let file = std::fs::File::create(path).unwrap();
     let schema = Packet::serialize(Packet::new()).schema();
-
     let props = parquet::file::properties::WriterProperties::builder()
         .set_compression(parquet::basic::Compression::ZSTD(
             parquet::basic::ZstdLevel::try_new(3).unwrap(),
         ))
         .build();
 
-    let path = std::path::Path::new(output_path.as_str());
-    let file = std::fs::File::create(path).unwrap();
     let mut writer = parquet::arrow::ArrowWriter::try_new(file, schema, Some(props)).unwrap();
 
     // loop over packets in pcap file
@@ -96,7 +95,9 @@ fn main() {
         parse_ethernet_frame(packet, &mut packet_fields);
 
         // write the packet data to parquet file
-        write_packet_to_parquet(packet_fields.serialize(), &mut writer);
+        writer
+            .write(&packet_fields.serialize())
+            .expect("Writing batch");
     }
 
     // close the parquet file writer
@@ -184,13 +185,4 @@ fn parse_ethernet_frame(packet: &[u8], packet_fields: &mut Packet) {
         //TODO
         return;
     }
-}
-
-fn write_packet_to_parquet<W: std::io::Write>(
-    packet_record: arrow_array::RecordBatch,
-    writer: &mut parquet::arrow::ArrowWriter<W>,
-) where
-    W: Send,
-{
-    writer.write(&packet_record).expect("Writing batch");
 }
