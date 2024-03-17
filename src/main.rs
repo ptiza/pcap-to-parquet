@@ -188,13 +188,15 @@ fn parse_ethernet_frame(packet: &[u8], packet_fields: &mut Packet) {
             // IPv4 packet with VLAN tag
             parse_ipv4_packet(&packet[18..], packet_fields);
         } else {
-            todo!();
+            //TODO
+            return;
         }
     } else if ether_type == 0x800 {
         // IPv4 packet
         parse_ipv4_packet(&packet[14..], packet_fields);
     } else {
-        todo!();
+        //TODO
+        return;
     }
 }
 
