@@ -7,9 +7,9 @@ use libpcap::ffi;
 struct Packet {
     src_ip: Option<String>,
     dst_ip: Option<String>,
-    mm_ts: i64,
-    mm_id: u16,
-    mm_port: u8,
+    mm_ts: Option<i64>,
+    mm_id: Option<u16>,
+    mm_port: Option<u8>,
 }
 
 impl Packet {
@@ -127,9 +127,9 @@ fn parse_metamako_trailer(packet: &[u8], packet_fields: &mut Packet, pcap_ts: i6
     ]);
 
     if i64::abs(pcap_ts - mm_s as i64) < 5 * 60 && mm_ns < 1_000_000_000 {
-        packet_fields.mm_id = u16::from_be_bytes([packet[len - 7], packet[len - 6]]);
-        packet_fields.mm_port = u8::from_be_bytes([packet[len - 5]]);
-        packet_fields.mm_ts = mm_s as i64 * 10i64.pow(9) + mm_ns as i64;
+        packet_fields.mm_id = Some(u16::from_be_bytes([packet[len - 7], packet[len - 6]]));
+        packet_fields.mm_port = Some(u8::from_be_bytes([packet[len - 5]]));
+        packet_fields.mm_ts = Some(mm_s as i64 * 10i64.pow(9) + mm_ns as i64);
     }
 }
 
