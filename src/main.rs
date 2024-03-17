@@ -44,27 +44,26 @@ impl Packet {
 fn main() {
     let input_path = std::env::args().nth(1).expect("no input given");
     let output_path = std::env::args().nth(2).expect("no output path given");
-    let mut errbuf = [0 as core::ffi::c_char; ffi::PCAP_ERRBUF_SIZE as usize];
 
-    let file = std::ffi::CString::new(input_path).unwrap();
-    let handle = unsafe {
+    // pcap file setup
+    let pcap_file = std::ffi::CString::new(input_path).unwrap();
+    let mut pcap_errbuf = [0 as core::ffi::c_char; ffi::PCAP_ERRBUF_SIZE as usize];
+    let pcap_handle = unsafe {
         ffi::pcap_open_offline_with_tstamp_precision(
-            file.as_ptr(),
+            pcap_file.as_ptr(),
             ffi::PCAP_TSTAMP_PRECISION_NANO,
-            errbuf.as_mut_ptr(),
+            pcap_errbuf.as_mut_ptr(),
         )
     };
-
-    if handle.is_null() {
-        println!("Error opening file: {:?}", unsafe {
-            std::ffi::CStr::from_ptr(errbuf.as_ptr())
+    if pcap_handle.is_null() {
+        panic!("Error opening file: {:?}", unsafe {
+            std::ffi::CStr::from_ptr(pcap_errbuf.as_ptr())
         });
-        panic!();
     }
 
     // parquet file setup
-    let path = std::path::Path::new(output_path.as_str());
-    let file = std::fs::File::create(path).unwrap();
+    let output_path = std::path::Path::new(output_path.as_str());
+    let parquet_file = std::fs::File::create(output_path).unwrap();
     let schema = Packet::serialize(Packet::new()).schema();
     let props = parquet::file::properties::WriterProperties::builder()
         .set_compression(parquet::basic::Compression::ZSTD(
@@ -73,12 +72,13 @@ fn main() {
         .set_writer_version(parquet::file::properties::WriterVersion::PARQUET_2_0)
         .build();
 
-    let mut writer = parquet::arrow::ArrowWriter::try_new(file, schema, Some(props)).unwrap();
+    let mut parquet_writer =
+        parquet::arrow::ArrowWriter::try_new(parquet_file, schema, Some(props)).unwrap();
 
     // loop over packets in pcap file
     loop {
         let mut pkt_header: ffi::pcap_pkthdr = Default::default();
-        let packet = unsafe { ffi::pcap_next(handle, &mut pkt_header) };
+        let packet = unsafe { ffi::pcap_next(pcap_handle, &mut pkt_header) };
         if packet.is_null() {
             break; // end of file
         }
@@ -96,15 +96,15 @@ fn main() {
         parse_ethernet_frame(packet, &mut packet_fields);
 
         // write the packet data to parquet file
-        writer
+        parquet_writer
             .write(&packet_fields.serialize())
             .expect("Writing batch");
     }
 
     // close the parquet file writer
-    writer.close().unwrap();
+    parquet_writer.close().unwrap();
 
-    unsafe { ffi::pcap_close(handle) }
+    unsafe { ffi::pcap_close(pcap_handle) }
 }
 
 /// Check for metamako trailer by comparing capture timestamp with suspected metamako
