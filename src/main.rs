@@ -60,7 +60,7 @@ enum PacketField {
 fn main() {
     let input_path = std::env::args().nth(1).expect("no input given");
     let output_path = std::env::args().nth(2).expect("no output path given");
-    let mut errbuf = [0 as std::os::raw::c_char; ffi::PCAP_ERRBUF_SIZE as usize];
+    let mut errbuf = [0 as core::ffi::c_char; ffi::PCAP_ERRBUF_SIZE as usize];
 
     let file = std::ffi::CString::new(input_path).unwrap();
     let handle = unsafe {
