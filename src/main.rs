@@ -7,6 +7,9 @@ use libpcap::ffi;
 struct Packet {
     src_ip: Option<String>,
     dst_ip: Option<String>,
+    protocol: Option<String>,
+    src_port: Option<u16>,
+    dst_port: Option<u16>,
     mm_ts: Option<i64>,
     mm_id: Option<u16>,
     mm_port: Option<u8>,
@@ -23,6 +26,12 @@ impl Packet {
             std::sync::Arc::new(arrow_array::StringArray::from(vec![self.src_ip]));
         let dst_ip: arrow_array::ArrayRef =
             std::sync::Arc::new(arrow_array::StringArray::from(vec![self.dst_ip]));
+        let protocol: arrow_array::ArrayRef =
+            std::sync::Arc::new(arrow_array::StringArray::from(vec![self.protocol]));
+        let src_port: arrow_array::ArrayRef =
+            std::sync::Arc::new(arrow_array::UInt16Array::from(vec![self.src_port]));
+        let dst_port: arrow_array::ArrayRef =
+            std::sync::Arc::new(arrow_array::UInt16Array::from(vec![self.dst_port]));
         let mm_ts: arrow_array::ArrayRef =
             std::sync::Arc::new(arrow_array::Int64Array::from(vec![self.mm_ts]));
         let mm_id: arrow_array::ArrayRef =
@@ -33,6 +42,9 @@ impl Packet {
         arrow_array::RecordBatch::try_from_iter(vec![
             ("src_ip", src_ip),
             ("dst_ip", dst_ip),
+            ("protocol", protocol),
+            ("src_port", src_port),
+            ("dst_port", dst_port),
             ("mm_ts", mm_ts),
             ("mm_id", mm_id),
             ("mm_port", mm_port),
@@ -137,9 +149,9 @@ fn parse_metamako_trailer(packet: &[u8], packet_fields: &mut Packet, pcap_ts: i6
 
 fn parse_ipv4_packet(packet: &[u8], packet_fields: &mut Packet) {
     // let version = (packet[0] & 0xF0) >> 4;
-    // let header_length = (packet[0] & 0x0F) * 4;
+    let header_length = (packet[0] & 0x0F) * 4;
     // let total_length = u16::from_be_bytes([packet[2], packet[3]]);
-    // let protocol = &packet[9];
+    let protocol = &packet[9];
     let src_addr = &packet[12..16];
     let dst_addr = &packet[16..20];
 
@@ -161,6 +173,40 @@ fn parse_ipv4_packet(packet: &[u8], packet_fields: &mut Packet) {
         ))
         .to_string(),
     );
+
+    match protocol {
+        1 => packet_fields.protocol = Some(String::from("ICMP")),
+        2 => packet_fields.protocol = Some(String::from("IGMP")),
+        6 => {
+            packet_fields.protocol = Some(String::from("TCP"));
+            parse_tcp_packet(&packet[header_length as _..], packet_fields)
+        }
+        17 => {
+            packet_fields.protocol = Some(String::from("UDP"));
+            parse_udp_packet(&packet[header_length as _..], packet_fields)
+        }
+        _ => (),
+    }
+}
+
+fn parse_udp_packet(packet: &[u8], packet_fields: &mut Packet) {
+    let src_port = u16::from_be_bytes([packet[0], packet[1]]);
+    let dst_port = u16::from_be_bytes([packet[2], packet[3]]);
+
+    packet_fields.src_port = Some(src_port);
+    packet_fields.dst_port = Some(dst_port);
+
+    //TODO
+}
+
+fn parse_tcp_packet(packet: &[u8], packet_fields: &mut Packet) {
+    let src_port = u16::from_be_bytes([packet[0], packet[1]]);
+    let dst_port = u16::from_be_bytes([packet[2], packet[3]]);
+
+    packet_fields.src_port = Some(src_port);
+    packet_fields.dst_port = Some(dst_port);
+
+    //TODO
 }
 
 /// Assuming Ethernet II frame format (14 bytes header)
@@ -169,19 +215,17 @@ fn parse_ethernet_frame(packet: &[u8], packet_fields: &mut Packet) {
     // let source_mac = &packet[6..12];
     let ether_type = u16::from_be_bytes([packet[12], packet[13]]);
 
-    if ether_type == 0x8100 {
-        let ether_type = u16::from_be_bytes([packet[16], packet[17]]);
-
-        if ether_type == 0x800 {
-            // IPv4 packet with VLAN tag
-            parse_ipv4_packet(&packet[18..], packet_fields);
-        } else {
-            //TODO
-        }
-    } else if ether_type == 0x800 {
+    match ether_type {
         // IPv4 packet
-        parse_ipv4_packet(&packet[14..], packet_fields);
-    } else {
-        //TODO
+        0x800 => parse_ipv4_packet(&packet[14..], packet_fields),
+        0x8100 => {
+            let ether_type = u16::from_be_bytes([packet[16], packet[17]]);
+            match ether_type {
+                // IPv4 packet with VLAN tag
+                0x800 => parse_ipv4_packet(&packet[18..], packet_fields),
+                _ => (),
+            }
+        }
+        _ => (),
     }
 }
