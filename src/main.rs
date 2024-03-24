@@ -1,5 +1,4 @@
-mod libpcap;
-use libpcap::ffi;
+use pcap_parser::traits::PcapReaderIterator;
 
 /// Simple representation of the information
 /// that we want to extract from a packet
@@ -58,20 +57,9 @@ fn main() {
     let output_path = std::env::args().nth(2).expect("no output path given");
 
     // pcap file setup
-    let pcap_file = std::ffi::CString::new(input_path).unwrap();
-    let mut pcap_errbuf = [0 as core::ffi::c_char; ffi::PCAP_ERRBUF_SIZE as usize];
-    let pcap_handle = unsafe {
-        ffi::pcap_open_offline_with_tstamp_precision(
-            pcap_file.as_ptr(),
-            ffi::PCAP_TSTAMP_PRECISION_NANO,
-            pcap_errbuf.as_mut_ptr(),
-        )
-    };
-    if pcap_handle.is_null() {
-        panic!("Error opening file: {:?}", unsafe {
-            std::ffi::CStr::from_ptr(pcap_errbuf.as_ptr())
-        });
-    }
+    let pcap_file = std::fs::File::open(input_path).unwrap();
+    let mut pcap_reader =
+        pcap_parser::LegacyPcapReader::new(65536, pcap_file).expect("LegacyPcapReader");
 
     // parquet file setup
     let output_path = std::path::Path::new(output_path.as_str());
@@ -89,34 +77,41 @@ fn main() {
 
     // loop over packets in pcap file
     loop {
-        let mut pkt_header: ffi::pcap_pkthdr = Default::default();
-        let packet = unsafe { ffi::pcap_next(pcap_handle, &mut pkt_header) };
-        if packet.is_null() {
-            break; // end of file
+        match pcap_reader.next() {
+            Ok((offset, block)) => {
+                match block {
+                    pcap_parser::PcapBlockOwned::LegacyHeader(_) => (),
+                    pcap_parser::PcapBlockOwned::Legacy(b) => {
+                        let mut packet_fields = Packet::new();
+                        parse_metamako_trailer(
+                            b.data,
+                            &mut packet_fields,
+                            b.ts_sec as i64,
+                            b.origlen as _,
+                        );
+
+                        parse_ethernet_frame(b.data, &mut packet_fields);
+
+                        // write the packet data to parquet file
+                        parquet_writer
+                            .write(&packet_fields.serialize())
+                            .expect("Writing batch");
+                        // use linktype to parse b.data()
+                    }
+                    pcap_parser::PcapBlockOwned::NG(_) => unreachable!(),
+                }
+                pcap_reader.consume(offset);
+            }
+            Err(pcap_parser::PcapError::Eof) => break,
+            Err(pcap_parser::PcapError::Incomplete(_)) => {
+                pcap_reader.refill().unwrap();
+            }
+            Err(e) => panic!("error while reading: {:?}", e),
         }
-        let packet = unsafe { std::slice::from_raw_parts(packet, pkt_header.len as _) };
-
-        let mut packet_fields = Packet::new();
-
-        parse_metamako_trailer(
-            packet,
-            &mut packet_fields,
-            pkt_header.ts.tv_sec,
-            pkt_header.len as _,
-        );
-
-        parse_ethernet_frame(packet, &mut packet_fields);
-
-        // write the packet data to parquet file
-        parquet_writer
-            .write(&packet_fields.serialize())
-            .expect("Writing batch");
     }
 
     // close the parquet file writer
     parquet_writer.close().unwrap();
-
-    unsafe { ffi::pcap_close(pcap_handle) }
 }
 
 /// Check for metamako trailer by comparing capture timestamp with suspected metamako

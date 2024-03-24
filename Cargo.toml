@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 arrow-array = "50.0.0"
 parquet = "50.0.0"
+pcap-parser = "0.15.0"
 
 [profile.release]
 opt-level = 3       # All optimizations
