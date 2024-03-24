@@ -6,6 +6,7 @@ use pcap_parser::traits::PcapReaderIterator;
 struct Packet {
     src_ip: Option<String>,
     dst_ip: Option<String>,
+    len: Option<u32>,
     protocol: Option<String>,
     src_port: Option<u16>,
     dst_port: Option<u16>,
@@ -25,6 +26,8 @@ impl Packet {
             std::sync::Arc::new(arrow_array::StringArray::from(vec![self.src_ip]));
         let dst_ip: arrow_array::ArrayRef =
             std::sync::Arc::new(arrow_array::StringArray::from(vec![self.dst_ip]));
+        let len: arrow_array::ArrayRef =
+            std::sync::Arc::new(arrow_array::UInt32Array::from(vec![self.len]));
         let protocol: arrow_array::ArrayRef =
             std::sync::Arc::new(arrow_array::StringArray::from(vec![self.protocol]));
         let src_port: arrow_array::ArrayRef =
@@ -41,6 +44,7 @@ impl Packet {
         arrow_array::RecordBatch::try_from_iter(vec![
             ("src_ip", src_ip),
             ("dst_ip", dst_ip),
+            ("len", len),
             ("protocol", protocol),
             ("src_port", src_port),
             ("dst_port", dst_port),
@@ -83,6 +87,7 @@ fn main() {
                     pcap_parser::PcapBlockOwned::LegacyHeader(_) => (),
                     pcap_parser::PcapBlockOwned::Legacy(b) => {
                         let mut packet_fields = Packet::new();
+                        packet_fields.len = Some(b.origlen);
                         parse_metamako_trailer(
                             b.data,
                             &mut packet_fields,
