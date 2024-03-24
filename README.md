@@ -1,6 +1,6 @@
 # pcap-to-parquet
 
-Proof-of-concept on how to extract packet information from pcap files using [`libpcap`](https://github.com/the-tcpdump-group/libpcap),
+Proof-of-concept on how to extract packet information from pcap files using the [`pcap-parser`](https://docs.rs/pcap-parser/latest/pcap_parser) crate,
 and write them into a Parquet file using the [`parquet`](https://docs.rs/parquet/latest/parquet) crate.
 
 It also supports Metamako Ethernet trailer, tested with 

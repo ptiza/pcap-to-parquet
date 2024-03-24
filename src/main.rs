@@ -96,7 +96,6 @@ fn main() {
                         parquet_writer
                             .write(&packet_fields.serialize())
                             .expect("Writing batch");
-                        // use linktype to parse b.data()
                     }
                     pcap_parser::PcapBlockOwned::NG(_) => unreachable!(),
                 }
