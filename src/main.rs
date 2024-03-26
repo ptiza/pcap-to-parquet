@@ -88,7 +88,7 @@ fn main() {
                     pcap_parser::PcapBlockOwned::Legacy(b) => {
                         let mut packet_fields = Packet::new();
                         packet_fields.len = Some(b.origlen);
-                        parse_metamako_trailer(
+                        extract_all_metamako_trailers(
                             b.data,
                             &mut packet_fields,
                             b.ts_sec as i64,
@@ -118,6 +118,41 @@ fn main() {
     parquet_writer.close().unwrap();
 }
 
+/// A trailing 4-byte FCS might be present, or multiple trailers due to aggregation.
+/// We don't know about this, so we have to try at least twice.
+/// If one trailer is found, search for additional trailers.
+/// The information in the first trailer will be saved in `packet_fields`.
+
+fn extract_all_metamako_trailers(
+    packet: &[u8],
+    packet_fields: &mut Packet,
+    pcap_ts: i64,
+    len: usize,
+) {
+    match parse_metamako_trailer(packet, packet_fields, pcap_ts, len) {
+        Ok(tr_len) => {
+            let mut i = tr_len;
+            while i <= len - tr_len {
+                i += parse_metamako_trailer(packet, packet_fields, pcap_ts, len - i)
+                    .ok()
+                    .unwrap_or(1);
+            }
+        }
+        Err(_) => {
+            if let Some(tr_len) =
+                parse_metamako_trailer(packet, packet_fields, pcap_ts, len - 4).ok()
+            {
+                let mut i = tr_len;
+                while i <= len - tr_len - 4 {
+                    i += parse_metamako_trailer(packet, packet_fields, pcap_ts, len - i - 4)
+                        .ok()
+                        .unwrap_or(1);
+                }
+            }
+        }
+    }
+}
+
 /// Check for metamako trailer by comparing capture timestamp with suspected metamako
 /// timestamp and checking validity of ns field
 ///
@@ -125,24 +160,33 @@ fn main() {
 /// is smaller than 5min, trailer is likely present
 ///
 /// Otherwise leaves fields empty
-fn parse_metamako_trailer(packet: &[u8], packet_fields: &mut Packet, pcap_ts: i64, len: usize) {
+fn parse_metamako_trailer(
+    packet: &[u8],
+    packet_fields: &mut Packet,
+    pcap_ts: i64,
+    len: usize,
+) -> Result<usize, Box<dyn std::error::Error>> {
     let mm_s = i32::from_be_bytes([
-        packet[len - 16],
-        packet[len - 15],
-        packet[len - 14],
-        packet[len - 13],
-    ]);
-    let mm_ns = i32::from_be_bytes([
         packet[len - 12],
         packet[len - 11],
         packet[len - 10],
         packet[len - 9],
     ]);
+    let mm_ns = i32::from_be_bytes([
+        packet[len - 8],
+        packet[len - 7],
+        packet[len - 6],
+        packet[len - 5],
+    ]);
 
     if i64::abs(pcap_ts - mm_s as i64) < 5 * 60 && mm_ns < 1_000_000_000 {
-        packet_fields.mm_id = Some(u16::from_be_bytes([packet[len - 7], packet[len - 6]]));
-        packet_fields.mm_port = Some(u8::from_be_bytes([packet[len - 5]]));
+        packet_fields.mm_id = Some(u16::from_be_bytes([packet[len - 3], packet[len - 2]]));
+        packet_fields.mm_port = Some(u8::from_be_bytes([packet[len - 1]]));
         packet_fields.mm_ts = Some(mm_s as i64 * 10i64.pow(9) + mm_ns as i64);
+        // min trailer length
+        Ok(16)
+    } else {
+        Err("no trailer found".into())
     }
 }
 
