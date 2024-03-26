@@ -88,12 +88,15 @@ fn main() {
                     pcap_parser::PcapBlockOwned::Legacy(b) => {
                         let mut packet_fields = Packet::new();
                         packet_fields.len = Some(b.origlen);
-                        extract_all_metamako_trailers(
-                            b.data,
-                            &mut packet_fields,
-                            b.ts_sec as i64,
-                            b.origlen as _,
-                        );
+                        // min trailer size
+                        if b.origlen >= 16 {
+                            extract_all_metamako_trailers(
+                                b.data,
+                                &mut packet_fields,
+                                b.ts_sec as i64,
+                                b.origlen as _,
+                            );
+                        }
 
                         parse_ethernet_frame(b.data, &mut packet_fields);
 
@@ -157,18 +160,16 @@ fn parse_metamako_trailer(
     pcap_ts: i64,
     len: usize,
 ) -> Option<usize> {
-    let mm_s = i32::from_be_bytes([
-        packet[len - 12],
-        packet[len - 11],
-        packet[len - 10],
-        packet[len - 9],
-    ]);
-    let mm_ns = i32::from_be_bytes([
-        packet[len - 8],
-        packet[len - 7],
-        packet[len - 6],
-        packet[len - 5],
-    ]);
+    let mm_s = i32::from_be_bytes(
+        packet[len - 12..len - 8]
+            .try_into()
+            .expect("incorrect slice len"),
+    );
+    let mm_ns = i32::from_be_bytes(
+        packet[len - 8..len - 4]
+            .try_into()
+            .expect("incorrect slice len"),
+    );
 
     if i64::abs(pcap_ts - mm_s as i64) < 5 * 60 && mm_ns < 1_000_000_000 {
         packet_fields.mm_id = Some(u16::from_be_bytes([packet[len - 3], packet[len - 2]]));
@@ -186,27 +187,13 @@ fn parse_ipv4_packet(packet: &[u8], packet_fields: &mut Packet) {
     let header_length = (packet[0] & 0x0F) * 4;
     // let total_length = u16::from_be_bytes([packet[2], packet[3]]);
     let protocol = &packet[9];
-    let src_addr = &packet[12..16];
-    let dst_addr = &packet[16..20];
+    let src_addr: [u8; 4] = packet[12..16].try_into().expect("incorrect slice len");
+    let dst_addr: [u8; 4] = packet[16..20].try_into().expect("incorrect slice len");
 
-    packet_fields.src_ip = Some(
-        std::net::IpAddr::V4(std::net::Ipv4Addr::new(
-            src_addr[0],
-            src_addr[1],
-            src_addr[2],
-            src_addr[3],
-        ))
-        .to_string(),
-    );
-    packet_fields.dst_ip = Some(
-        std::net::IpAddr::V4(std::net::Ipv4Addr::new(
-            dst_addr[0],
-            dst_addr[1],
-            dst_addr[2],
-            dst_addr[3],
-        ))
-        .to_string(),
-    );
+    packet_fields.src_ip =
+        Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(src_addr)).to_string());
+    packet_fields.dst_ip =
+        Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(dst_addr)).to_string());
 
     match protocol {
         1 => packet_fields.protocol = Some(String::from("ICMP")),
