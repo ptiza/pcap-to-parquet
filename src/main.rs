@@ -122,33 +122,24 @@ fn main() {
 /// We don't know about this, so we have to try at least twice.
 /// If one trailer is found, search for additional trailers.
 /// The information in the first trailer will be saved in `packet_fields`.
-
 fn extract_all_metamako_trailers(
     packet: &[u8],
     packet_fields: &mut Packet,
     pcap_ts: i64,
     len: usize,
 ) {
-    match parse_metamako_trailer(packet, packet_fields, pcap_ts, len) {
-        Ok(tr_len) => {
-            let mut i = tr_len;
-            while i <= len - tr_len {
-                i += parse_metamako_trailer(packet, packet_fields, pcap_ts, len - i)
-                    .ok()
-                    .unwrap_or(1);
-            }
+    if let Some(tr_len) = parse_metamako_trailer(packet, packet_fields, pcap_ts, len) {
+        // one trailer found, check for additional trailers
+        let mut i = tr_len;
+        while i <= len - tr_len {
+            i += parse_metamako_trailer(packet, packet_fields, pcap_ts, len - i).unwrap_or(1);
         }
-        Err(_) => {
-            if let Some(tr_len) =
-                parse_metamako_trailer(packet, packet_fields, pcap_ts, len - 4).ok()
-            {
-                let mut i = tr_len;
-                while i <= len - tr_len - 4 {
-                    i += parse_metamako_trailer(packet, packet_fields, pcap_ts, len - i - 4)
-                        .ok()
-                        .unwrap_or(1);
-                }
-            }
+    // trailing FCS (4 bytes) might be present
+    } else if let Some(tr_len) = parse_metamako_trailer(packet, packet_fields, pcap_ts, len - 4) {
+        // one trailer found, check for additional trailers
+        let mut i = tr_len;
+        while i <= len - tr_len - 4 {
+            i += parse_metamako_trailer(packet, packet_fields, pcap_ts, len - i - 4).unwrap_or(1);
         }
     }
 }
@@ -165,7 +156,7 @@ fn parse_metamako_trailer(
     packet_fields: &mut Packet,
     pcap_ts: i64,
     len: usize,
-) -> Result<usize, Box<dyn std::error::Error>> {
+) -> Option<usize> {
     let mm_s = i32::from_be_bytes([
         packet[len - 12],
         packet[len - 11],
@@ -184,9 +175,9 @@ fn parse_metamako_trailer(
         packet_fields.mm_port = Some(u8::from_be_bytes([packet[len - 1]]));
         packet_fields.mm_ts = Some(mm_s as i64 * 10i64.pow(9) + mm_ns as i64);
         // min trailer length
-        Ok(16)
+        Some(16)
     } else {
-        Err("no trailer found".into())
+        None
     }
 }
 
